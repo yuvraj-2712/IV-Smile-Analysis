@@ -264,10 +264,18 @@ with st.sidebar:
     end_date = st.date_input("Window End", max(available_dates) if available_dates else None)
 
     st.divider()
-    st.markdown("**3-Factor Master Engine**")
-    f1_thresh = st.number_input("F1 Threshold (Time-Series)", value=1.5, step=0.1, min_value=0.5, max_value=4.0)
-    f2_thresh = st.number_input("F2 Threshold (Spatial Arb)", value=1.5, step=0.1, min_value=0.5, max_value=4.0)
-    f3_thresh = st.number_input("F3 Threshold (Macro Arb)", value=1.5, step=0.1, min_value=0.5, max_value=4.0)
+    st.markdown("**3-Factor: Entry Thresholds (Magnitude)**")
+    f1_entry = st.number_input("F1 Entry (Time-Series)", value=2.0, step=0.1, min_value=0.5, max_value=5.0)
+    f2_entry = st.number_input("F2 Entry (Spatial Arb)", value=2.0, step=0.1, min_value=0.5, max_value=5.0)
+    f3_entry = st.number_input("F3 Entry (Macro Arb)", value=2.0, step=0.1, min_value=0.5, max_value=5.0)
+    
+    st.markdown("**3-Factor: Exit Thresholds (Magnitude)**")
+    f1_exit = st.number_input("F1 Exit (Time-Series)", value=1.0, step=0.1, min_value=0.0, max_value=5.0)
+    f2_exit = st.number_input("F2 Exit (Spatial Arb)", value=1.0, step=0.1, min_value=0.0, max_value=5.0)
+    f3_exit = st.number_input("F3 Exit (Macro Arb)", value=1.0, step=0.1, min_value=0.0, max_value=5.0)
+    
+    st.markdown("**Risk Management**")
+    max_hold_days = st.number_input("Time Stop (Max Hold Days)", value=21, step=1, min_value=1, max_value=100)
 
 st.title("Options Volatility & Arbitrage Engine")
 
@@ -404,7 +412,7 @@ with tab_vol:
                     val = series.iloc[-1]
                     val_yday = series.loc[date2] if date2 in series.index else (series.iloc[-2] if len(series) > 1 else np.nan)
                     chg = val - val_yday if pd.notna(val_yday) else np.nan
-                    f1, f2, f3, cons = run_3factor(series, macro_df, spatial_df, f1_thresh, f2_thresh, f3_thresh)
+                    f1, f2, f3, cons = run_3factor(series, macro_df, spatial_df, f1_entry, f2_entry, f3_entry)
                     struct_data.append({'Type': 'Spread', 'Structure': name, 'Current': val, 'Chg': chg, 'F1': f1, 'F2': f2, 'F3': f3, 'Signal': cons})
         
             # Flies
@@ -425,7 +433,7 @@ with tab_vol:
                     val = series.iloc[-1]
                     val_yday = series.loc[date2] if date2 in series.index else (series.iloc[-2] if len(series) > 1 else np.nan)
                     chg = val - val_yday if pd.notna(val_yday) else np.nan
-                    f1, f2, f3, cons = run_3factor(series, macro_df, spatial_df, f1_thresh, f2_thresh, f3_thresh)
+                    f1, f2, f3, cons = run_3factor(series, macro_df, spatial_df, f1_entry, f2_entry, f3_entry)
                     struct_data.append({'Type': 'Fly', 'Structure': name, 'Current': val, 'Chg': chg, 'F1': f1, 'F2': f2, 'F3': f3, 'Signal': cons})
                 
             if struct_data:
@@ -965,9 +973,7 @@ with tab_trade:
     st.markdown("Takes trades ONLY when all 3 factors (**F1, F2, F3**) strongly agree the spread is mispriced. It calculates rolling 252-day out-of-sample regressions. When consensus exceeds the threshold, it enters and holds until F1 normalizes.")
     
     struct_type_trade = st.radio("Select Structure Type for Backtest", ["Spreads (5D Gap)", "Butterflies (5D Gap)"], horizontal=True, key='tt_radio')
-    c1, c2 = st.columns(2)
-    exit_z = c1.number_input("Exit Z-Score Threshold", value=0.0, step=0.1, min_value=0.0, max_value=2.0, help="Target F1 Z-score to take profit.")
-    max_hold_days = c2.number_input("Time Stop (Max Hold Days)", value=10, step=1, min_value=1, max_value=60, help="Forces the trade to close after this many days.")
+
     
     if st.button("Run Backtest on Qualified Structures", type="primary"):
         with st.spinner("Classifying structures and running backtest..."):
@@ -1072,8 +1078,8 @@ with tab_trade:
                         if pd.isna(c_z1) or pd.isna(c_z2) or pd.isna(c_z3): continue
                         
                         # 3-FACTOR MASTER SIGNAL: Enter only if ALL THREE strongly agree
-                        is_short_signal = (c_z1 > f1_thresh) and (c_z2 > f2_thresh) and (c_z3 > f3_thresh)
-                        is_long_signal = (c_z1 < -f1_thresh) and (c_z2 < -f2_thresh) and (c_z3 < -f3_thresh)
+                        is_short_signal = (c_z1 > f1_entry) and (c_z2 > f2_entry) and (c_z3 > f3_entry)
+                        is_long_signal = (c_z1 < -f1_entry) and (c_z2 < -f2_entry) and (c_z3 < -f3_entry)
                         
                         if in_trade == 0:
                             if is_short_signal:
@@ -1086,8 +1092,11 @@ with tab_trade:
                                 current_hold = 0
                         else:
                             current_hold += 1
-                            # Exit logic purely based on F1 reverting (the primary mean)
-                            if (in_trade == 1 and c_z1 >= -exit_z) or (in_trade == -1 and c_z1 <= exit_z) or current_hold >= max_hold_days:
+                            # Exit logic: if ANY factor reverts past its exit threshold, take profit/cut loss
+                            exit_long = (c_z1 >= -f1_exit) or (c_z2 >= -f2_exit) or (c_z3 >= -f3_exit)
+                            exit_short = (c_z1 <= f1_exit) or (c_z2 <= f2_exit) or (c_z3 <= f3_exit)
+                            
+                            if (in_trade == 1 and exit_long) or (in_trade == -1 and exit_short) or current_hold >= max_hold_days:
                                 trades += 1
                                 hold_days.append(current_hold)
                                 pnl = (curr_v - entry_val) if in_trade == 1 else (entry_val - curr_v)
