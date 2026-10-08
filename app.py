@@ -318,10 +318,17 @@ with tab_vol:
         # Build Macro DF for F2 and F3
         spot_series = df_ladder.groupby(df_ladder['Date'].dt.date)['Underlying'].first()
         if 'ATM' in iv_pure.columns:
+            vix_s = market_sheets['VIX'].set_index('Date')['Value'] if 'VIX' in market_sheets else pd.Series(dtype=float)
+            vvix_s = market_sheets['VVIX'].set_index('Date')['Value'] if 'VVIX' in market_sheets else pd.Series(dtype=float)
+            vix_s.index = pd.to_datetime(vix_s.index).date
+            vvix_s.index = pd.to_datetime(vvix_s.index).date
+            
             macro_df = pd.DataFrame({
                 'ATM_IV': iv_pure['ATM'],
                 'd_ATM': iv_pure['ATM'].diff(),
-                'Spot_Ret': spot_series.pct_change()
+                'Spot_Ret': spot_series.pct_change(),
+                'VIX': vix_s,
+                'VVIX': vvix_s
             }).dropna()
         else: macro_df = pd.DataFrame()
     
@@ -360,9 +367,9 @@ with tab_vol:
             else:
                 f2 = "N/A"
         
-            # F3: Macro Fair Value Arb (ATM Level, dATM, Spot Ret)
+            # F3: Macro Fair Value Arb (ATM Level, dATM, Spot Ret, VIX, VVIX)
             try:
-                X3 = sm.add_constant(m[['ATM_IV', 'd_ATM', 'Spot_Ret']])
+                X3 = sm.add_constant(m)
                 model3 = sm.OLS(s, X3).fit()
                 resid3 = s - model3.fittedvalues
                 z3 = resid3.iloc[-1] / resid3.std() if resid3.std() != 0 else 0
@@ -383,13 +390,14 @@ with tab_vol:
             for i in range(len(cols) - 1):
                 leg1, leg2 = cols[i], cols[i+1]
                 name = f"{leg1} vs {leg2}"
-                series = (hist_iv[leg1] - hist_iv[leg2]).dropna()
+                atm_series = hist_iv['ATM'] if 'ATM' in hist_iv.columns else pd.Series(1, index=hist_iv.index)
+                series = ((hist_iv[leg1] - hist_iv[leg2]) / atm_series).dropna()
             
                 sp_dict = {}
                 for j in range(max(0, i-5), i):
-                    sp_dict[f'L_{i-j}'] = hist_iv[cols[j]] - hist_iv[cols[j+1]]
+                    sp_dict[f'L_{i-j}'] = (hist_iv[cols[j]] - hist_iv[cols[j+1]]) / atm_series
                 for j in range(i+1, min(len(cols)-1, i+6)):
-                    sp_dict[f'R_{j-i}'] = hist_iv[cols[j]] - hist_iv[cols[j+1]]
+                    sp_dict[f'R_{j-i}'] = (hist_iv[cols[j]] - hist_iv[cols[j+1]]) / atm_series
                 spatial_df = pd.DataFrame(sp_dict).dropna()
             
                 if not series.empty:
@@ -403,13 +411,14 @@ with tab_vol:
             for i in range(len(cols) - 2):
                 leg1, leg2, leg3 = cols[i], cols[i+1], cols[i+2]
                 name = f"{leg1} / {leg2} / {leg3} Fly"
-                series = (hist_iv[leg1] - 2*hist_iv[leg2] + hist_iv[leg3]).dropna()
+                atm_series = hist_iv['ATM'] if 'ATM' in hist_iv.columns else pd.Series(1, index=hist_iv.index)
+                series = ((hist_iv[leg1] - 2*hist_iv[leg2] + hist_iv[leg3]) / atm_series).dropna()
             
                 sp_dict = {}
                 for j in range(max(0, i-5), i):
-                    sp_dict[f'L_{i-j}'] = hist_iv[cols[j]] - 2*hist_iv[cols[j+1]] + hist_iv[cols[j+2]]
+                    sp_dict[f'L_{i-j}'] = (hist_iv[cols[j]] - 2*hist_iv[cols[j+1]] + hist_iv[cols[j+2]]) / atm_series
                 for j in range(i+1, min(len(cols)-2, i+6)):
-                    sp_dict[f'R_{j-i}'] = hist_iv[cols[j]] - 2*hist_iv[cols[j+1]] + hist_iv[cols[j+2]]
+                    sp_dict[f'R_{j-i}'] = (hist_iv[cols[j]] - 2*hist_iv[cols[j+1]] + hist_iv[cols[j+2]]) / atm_series
                 spatial_df = pd.DataFrame(sp_dict).dropna()
             
                 if not series.empty:
