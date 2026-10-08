@@ -280,7 +280,7 @@ with st.sidebar:
 st.title("Options Volatility & Arbitrage Engine")
 
 # Tabs
-tab_vol, tab_regime, tab_mr, tab_trade = st.tabs(["📈 Volatility Surface", "🧠 Regime Analysis", "📊 MR Classification", "🤖 Trade Backtester"])
+tab_vol, tab_regime, tab_mr, tab_trade, tab_fly = st.tabs(["📈 Volatility Surface", "🧠 Regime Analysis", "📊 MR Classification", "🤖 Trade Backtester", "🦋 Fly Curves"])
 
 with tab_vol:
 
@@ -1149,3 +1149,51 @@ with tab_trade:
             else:
                 st.warning("No structures qualified as MR.")
 
+
+with tab_fly:
+    st.header("🦋 Daily Butterfly Curves")
+    st.markdown(f"Plots the Net IV and Net Premium for all 5-Delta Butterflies across the curve for **{date1}**.")
+    
+    df_d1 = df_ladder[df_ladder['Date'].dt.date == date1]
+    
+    if not df_d1.empty:
+        iv_dict = dict(zip(df_d1['Label 1'], df_d1['IV 1']))
+        prem_dict = dict(zip(df_d1['Label 1'], df_d1['Premium 1']))
+        
+        fly_ordered = [
+            '5 delta put', '10 delta put', '15 delta put', '20 delta put', '25 delta put',
+            '30 delta put', '35 delta put', '40 delta put', '45 delta put', 'ATM',
+            '45 delta call', '40 delta call', '35 delta call', '30 delta call', '25 delta call',
+            '20 delta call', '15 delta call', '10 delta call', '5 delta call'
+        ]
+        
+        fly_labels = []
+        fly_ivs = []
+        fly_prems = []
+        
+        for i in range(1, len(fly_ordered) - 1):
+            L = fly_ordered[i-1]
+            C = fly_ordered[i]
+            R = fly_ordered[i+1]
+            
+            if L in iv_dict and C in iv_dict and R in iv_dict:
+                net_iv = iv_dict[L] - 2 * iv_dict[C] + iv_dict[R]
+                net_prem = prem_dict[L] - 2 * prem_dict[C] + prem_dict[R]
+                fly_labels.append(C)
+                fly_ivs.append(net_iv)
+                fly_prems.append(net_prem)
+                
+        if fly_labels:
+            fig_iv = go.Figure()
+            fig_iv.add_trace(go.Scatter(x=fly_labels, y=fly_ivs, mode='lines+markers', name='Net IV', line=dict(color='#8b5cf6', width=3), marker=dict(size=8)))
+            fig_iv.update_layout(title=f"Net IV Butterfly Curve ({date1})", xaxis_title="Center Delta (Short Leg)", yaxis_title="Net IV", template='plotly_dark')
+            
+            fig_prem = go.Figure()
+            fig_prem.add_trace(go.Scatter(x=fly_labels, y=fly_prems, mode='lines+markers', name='Net Premium', line=dict(color='#3b82f6', width=3), marker=dict(size=8)))
+            fig_prem.update_layout(title=f"Net Premium Butterfly Curve ({date1})", xaxis_title="Center Delta (Short Leg)", yaxis_title="Net Premium ($)", template='plotly_dark')
+            
+            c1, c2 = st.columns(2)
+            c1.plotly_chart(fig_iv, use_container_width=True)
+            c2.plotly_chart(fig_prem, use_container_width=True)
+        else:
+            st.warning("Not enough continuous strike data to construct butterflies for this date.")
