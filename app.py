@@ -1151,14 +1151,24 @@ with tab_trade:
 
 
 with tab_fly:
-    st.header("🦋 Daily Butterfly Curves")
-    st.markdown(f"Plots the Net IV and Net Premium for all 5-Delta Butterflies across the curve for **{date1}**.")
+    st.header("🦋 Daily Butterfly Curves (Comparison)")
+    st.markdown(f"Plots the Net IV and Net Premium for all 5-Delta Butterflies across the curve for **{date1}** vs **{date2}**.")
+    
+    xaxis_choice = st.radio("Select X-Axis", ["Delta", "Strike"], horizontal=True)
     
     df_d1 = df_ladder[df_ladder['Date'].dt.date == date1]
+    df_d2 = df_ladder[df_ladder['Date'].dt.date == date2] if date2 else pd.DataFrame()
     
     if not df_d1.empty:
-        iv_dict = dict(zip(df_d1['Label 1'], df_d1['IV 1']))
-        prem_dict = dict(zip(df_d1['Label 1'], df_d1['Premium 1']))
+        # Data for D1
+        iv_dict_d1 = dict(zip(df_d1['Label 1'], df_d1['IV 1']))
+        prem_dict_d1 = dict(zip(df_d1['Label 1'], df_d1['Premium 1']))
+        strike_dict_d1 = dict(zip(df_d1['Label 1'], df_d1['Strike 1']))
+        
+        # Data for D2
+        iv_dict_d2 = dict(zip(df_d2['Label 1'], df_d2['IV 1'])) if not df_d2.empty else {}
+        prem_dict_d2 = dict(zip(df_d2['Label 1'], df_d2['Premium 1'])) if not df_d2.empty else {}
+        strike_dict_d2 = dict(zip(df_d2['Label 1'], df_d2['Strike 1'])) if not df_d2.empty else {}
         
         fly_ordered = [
             '5 delta put', '10 delta put', '15 delta put', '20 delta put', '25 delta put',
@@ -1168,29 +1178,61 @@ with tab_fly:
         ]
         
         fly_labels = []
-        fly_ivs = []
-        fly_prems = []
+        
+        fly_ivs_d1 = []
+        fly_prems_d1 = []
+        fly_strikes_d1 = []
+        
+        fly_ivs_d2 = []
+        fly_prems_d2 = []
+        fly_strikes_d2 = []
         
         for i in range(1, len(fly_ordered) - 1):
             L = fly_ordered[i-1]
             C = fly_ordered[i]
             R = fly_ordered[i+1]
             
-            if L in iv_dict and C in iv_dict and R in iv_dict:
-                net_iv = iv_dict[L] - 2 * iv_dict[C] + iv_dict[R]
-                net_prem = prem_dict[L] - 2 * prem_dict[C] + prem_dict[R]
-                fly_labels.append(C)
-                fly_ivs.append(net_iv)
-                fly_prems.append(net_prem)
-                
-        if fly_labels:
-            fig_iv = go.Figure()
-            fig_iv.add_trace(go.Scatter(x=fly_labels, y=fly_ivs, mode='lines+markers', name='Net IV', line=dict(color='#8b5cf6', width=3), marker=dict(size=8)))
-            fig_iv.update_layout(title=f"Net IV Butterfly Curve ({date1})", xaxis_title="Center Delta (Short Leg)", yaxis_title="Net IV", template='plotly_dark')
+            fly_labels.append(C)
             
+            # D1 Logic
+            if L in iv_dict_d1 and C in iv_dict_d1 and R in iv_dict_d1:
+                fly_ivs_d1.append(iv_dict_d1[L] - 2 * iv_dict_d1[C] + iv_dict_d1[R])
+                fly_prems_d1.append(prem_dict_d1[L] - 2 * prem_dict_d1[C] + prem_dict_d1[R])
+                fly_strikes_d1.append(strike_dict_d1[C])
+            else:
+                fly_ivs_d1.append(None)
+                fly_prems_d1.append(None)
+                fly_strikes_d1.append(None)
+                
+            # D2 Logic
+            if L in iv_dict_d2 and C in iv_dict_d2 and R in iv_dict_d2:
+                fly_ivs_d2.append(iv_dict_d2[L] - 2 * iv_dict_d2[C] + iv_dict_d2[R])
+                fly_prems_d2.append(prem_dict_d2[L] - 2 * prem_dict_d2[C] + prem_dict_d2[R])
+                fly_strikes_d2.append(strike_dict_d2[C])
+            else:
+                fly_ivs_d2.append(None)
+                fly_prems_d2.append(None)
+                fly_strikes_d2.append(None)
+                
+        if any(v is not None for v in fly_ivs_d1):
+            fig_iv = go.Figure()
             fig_prem = go.Figure()
-            fig_prem.add_trace(go.Scatter(x=fly_labels, y=fly_prems, mode='lines+markers', name='Net Premium', line=dict(color='#3b82f6', width=3), marker=dict(size=8)))
-            fig_prem.update_layout(title=f"Net Premium Butterfly Curve ({date1})", xaxis_title="Center Delta (Short Leg)", yaxis_title="Net Premium ($)", template='plotly_dark')
+            
+            # Determine X-Axis
+            x_d1 = fly_strikes_d1 if xaxis_choice == "Strike" else fly_labels
+            x_d2 = fly_strikes_d2 if xaxis_choice == "Strike" else fly_labels
+            
+            # Add D2 (Yesterday)
+            if any(v is not None for v in fly_ivs_d2):
+                fig_iv.add_trace(go.Scatter(x=x_d2, y=fly_ivs_d2, mode='lines+markers', name=f'Net IV ({date2})', line=dict(color='#64748b', width=2, dash='dash'), marker=dict(size=6)))
+                fig_prem.add_trace(go.Scatter(x=x_d2, y=fly_prems_d2, mode='lines+markers', name=f'Net Premium ({date2})', line=dict(color='#64748b', width=2, dash='dash'), marker=dict(size=6)))
+            
+            # Add D1 (Today)
+            fig_iv.add_trace(go.Scatter(x=x_d1, y=fly_ivs_d1, mode='lines+markers', name=f'Net IV ({date1})', line=dict(color='#8b5cf6', width=3), marker=dict(size=8)))
+            fig_prem.add_trace(go.Scatter(x=x_d1, y=fly_prems_d1, mode='lines+markers', name=f'Net Premium ({date1})', line=dict(color='#3b82f6', width=3), marker=dict(size=8)))
+            
+            fig_iv.update_layout(title=f"Net IV Butterfly Curve", xaxis_title=xaxis_choice, yaxis_title="Net IV", template='plotly_dark')
+            fig_prem.update_layout(title=f"Net Premium Butterfly Curve", xaxis_title=xaxis_choice, yaxis_title="Net Premium ($)", template='plotly_dark')
             
             c1, c2 = st.columns(2)
             c1.plotly_chart(fig_iv, use_container_width=True)
